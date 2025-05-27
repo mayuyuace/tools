@@ -93,7 +93,7 @@ def load_model_config(args):
         with open(config_file, "r") as f:
             config = json.load(f)
     else:
-        raise ValueError(f"Unsupported model: {args.model}. Please provide a valid model name.")
+        raise ValueError(f"Unsupported model: {args.model}. Only supports llama3-8b and qwen2.5-32b for now! Please provide a valid model name.")
     print(f"Loading model config from {config_file}...")
     # print(config)
     return config
@@ -259,10 +259,10 @@ def print_trace_stats(stats: TRACE_STATS, metric: EfficiencyMetrics):
     header += f" {'Utilization (%)':<15}"
     print(header)
     print("=" * len(header))
-    print(f"{'qkv GEMM':<30} {stats.total_qkv_gemm_kernels:<10} {stats.qkv_gemm_avg_time:<15.2f} {stats.qkv_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.qkv_gemm_time_std:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'out GEMM':<30} {stats.total_out_gemm_kernels:<10} {stats.out_gemm_avg_time:<15.2f} {stats.out_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.out_gemm_time_std:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'gate_up GEMM':<30} {stats.total_gateup_gemm_kernels:<10} {stats.gateup_gemm_avg_time:<15.2f} {stats.gateup_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.gateup_gemm_time_std:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'down GEMM':<30} {stats.total_down_gemm_kernels:<10} {stats.down_gemm_avg_time:<15.2f} {stats.down_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.down_gemm_time_std:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
+    print(f"{'qkv_gemm':<30} {stats.total_qkv_gemm_kernels:<10} {stats.qkv_gemm_avg_time:<15.2f} {stats.qkv_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.qkv_gemm_time_std:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
+    print(f"{'out_gemm':<30} {stats.total_out_gemm_kernels:<10} {stats.out_gemm_avg_time:<15.2f} {stats.out_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.out_gemm_time_std:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
+    print(f"{'gate_up_gemm':<30} {stats.total_gateup_gemm_kernels:<10} {stats.gateup_gemm_avg_time:<15.2f} {stats.gateup_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.gateup_gemm_time_std:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
+    print(f"{'down_gemm':<30} {stats.total_down_gemm_kernels:<10} {stats.down_gemm_avg_time:<15.2f} {stats.down_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.down_gemm_time_std:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
     print(f"{'fmha':<30} {stats.total_fmha_kernels:<10} {stats.fmha_avg_time:<15.2f} {stats.fmha_avg_time/stats.total_avg_time*100:<15.2f} {stats.fmha_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
     print(f"{'norm':<30} {stats.total_norm_kernels:<10} {stats.norm_avg_time:<15.2f} {stats.norm_avg_time/stats.total_avg_time*100:<15.2f} {stats.norm_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
     print(f"{'silu_and_mul':<30} {stats.total_act_kernels:<10} {stats.act_avg_time:<15.2f} {stats.act_avg_time/stats.total_avg_time*100:<15.2f} {stats.act_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
@@ -286,7 +286,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="llama3-8b",
-        help="Model name, e.g., llama3-8b, qwen32b, etc.",
+        help="Model name, e.g., llama3-8b, qwen2.5-32b, etc.",
     )
     parser.add_argument(
         "--weight_dtype",

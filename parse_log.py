@@ -64,16 +64,14 @@ def extract_scheduling_info(lines):
                 elif 'context_len' in cur_line:
                     context_len = int(cur_line.split(':')[-1].strip())
                     step_info['context_lens'].append(context_len)
-                    if context_len == 0:
-                        step_info['prefill_request_num'] += 1
-                    else:
-                        step_info['decode_request_num'] += 1
                 elif 'num_scheduled_token' in cur_line:
                     num_scheduled_token = int(cur_line.split(':')[-1].strip())
                     step_info['tokens'].append(num_scheduled_token)
                     if num_scheduled_token > 1:
+                        step_info['prefill_request_num'] += 1
                         step_info['prefill_tokens'] += num_scheduled_token
                     else:
+                        step_info['decode_request_num'] += 1
                         step_info['decode_tokens'] += num_scheduled_token
                 elif 'step' in cur_line:
                     temp = cur_line.split("=")[3]
@@ -89,6 +87,7 @@ def extract_scheduling_info(lines):
             assert sum(step_info['tokens']) == step_info['total_num_scheduled_tokens'], f"total_num_scheduled_tokens {step_info['total_num_scheduled_tokens']} does not match sum of tokens {sum(step_info['tokens'])}"
             assert step_info['prefill_request_num'] + step_info['decode_request_num'] == step_info['total_requests_num'], f"prefill_request_num {step_info['prefill_request_num']} + decode_request_num {step_info['decode_request_num']} does not equal total_requests_num {step_info['total_requests_num']}"
             assert step_info['prefill_tokens'] + step_info['decode_tokens'] == step_info['total_num_scheduled_tokens'], f"prefill_tokens {step_info['prefill_tokens']} + decode_tokens {step_info['decode_tokens']} does not equal total_num_scheduled_tokens {step_info['total_num_scheduled_tokens']}"
+            assert step_info['decode_request_num'] == step_info['decode_tokens'], f"decode_request_num {step_info['decode_request_num']} does not equal decode_tokens {step_info['decode_tokens']}"
 
             if step_info['step_id'] != -1:
                 sche_info['steps'].append(step_info)
