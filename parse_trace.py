@@ -5,7 +5,6 @@ import argparse
 from enum import Enum
 import numpy as np
 from dataclasses import dataclass
-from pprint import pprint
 
 CUR_PATH = os.path.dirname(os.path.abspath(__file__))
 HF_CONFIG_PATH = os.path.join(CUR_PATH, "hf_configs/")
@@ -45,7 +44,20 @@ class TRACE_STATS():
     total_other_kernels: int = 0
 
     total_kernel_time: float = 0.0
+    total_qkv_gemm_time: float = 0.0
+    total_out_gemm_time: float = 0.0
+    total_gateup_gemm_time: float = 0.0
+    total_down_gemm_time: float = 0.0
+    total_fmha_time: float = 0.0
+    total_norm_time: float = 0.0
+    total_act_time: float = 0.0
+    total_rope_time: float = 0.0
+    total_reshape_and_cache_time: float = 0.0
+    total_copy_time: float = 0.0
+    total_allreduce_time: float = 0.0
+    total_other_time: float = 0.0
     total_avg_time: float = 0.0
+
     qkv_gemm_avg_time: float = 0.0
     qkv_gemm_time_std: float = 0.0
     out_gemm_avg_time: float = 0.0
@@ -182,40 +194,52 @@ def parse_kernel_info(trace_events: List):
                 duration = event["dur"]
                 if 'gemm' in kernel_name:
                     if stats.total_gemm_kernels % 4 == 0:
+                        stats.total_qkv_gemm_time += duration
                         qkv_gemm_time_list.append(duration)
                         stats.total_qkv_gemm_kernels += 1
                     elif stats.total_gemm_kernels % 4 == 1:
+                        stats.total_out_gemm_time += duration
                         out_gemm_time_list.append(duration)
                         stats.total_out_gemm_kernels += 1
                     elif stats.total_gemm_kernels % 4 == 2:
+                        stats.total_gateup_gemm_time += duration
                         gateup_gemm_time_list.append(duration)
                         stats.total_gateup_gemm_kernels += 1
                     elif stats.total_gemm_kernels % 4 == 3:
+                        stats.total_down_gemm_time += duration
                         down_gemm_time_list.append(duration)
                         stats.total_down_gemm_kernels += 1
                     stats.total_gemm_kernels += 1
                 elif 'fmha' in kernel_name:
+                    stats.total_fmha_time += duration
                     fmha_time_list.append(duration)
                     stats.total_fmha_kernels += 1
                 elif 'norm' in kernel_name:
+                    stats.total_norm_time += duration
                     norm_time_list.append(duration)
                     stats.total_norm_kernels += 1
                 elif 'allreduce' in kernel_name:
+                    stats.total_allreduce_time += duration
                     allreduce_time_list.append(duration)
                     stats.total_allreduce_kernels += 1
                 elif 'op_and_mul' in kernel_name:
+                    stats.total_act_time += duration
                     act_time_list.append(duration)
                     stats.total_act_kernels += 1
                 elif 'rotaryembedding' in kernel_name:
+                    stats.total_rope_time += duration
                     rope_time_list.append(duration)
                     stats.total_rope_kernels += 1
                 elif 'reshapeandcache' in kernel_name:
+                    stats.total_reshape_and_cache_time += duration
                     reshape_and_cache_time_list.append(duration)
                     stats.total_reshape_and_cache_kernels += 1
                 elif 'copy' in kernel_name and 'globalrange' not in kernel_name:
+                    stats.total_copy_time += duration
                     copy_time_list.append(duration)
                     stats.total_copy_kernels += 1
                 else:
+                    stats.total_other_time += duration
                     other_time_list.append(duration)
                     stats.total_other_kernels += 1
                 stats.total_kernels += 1
@@ -254,26 +278,26 @@ def parse_kernel_info(trace_events: List):
 
 
 def print_trace_stats(stats: TRACE_STATS, metric: EfficiencyMetrics):
-    header = f"{'Kernel':<30} {'calls':<10} {'Avg Time (us)':<15} {'Avg Time (%)':<15} {'Std Dev (us)':<15}"
-    header += f" {'TFlops':<15}" if metric == EfficiencyMetrics.TFLOPS else f" {'Mem BW':<15}"
-    header += f" {'Utilization (%)':<15}"
+    header = f"{'Kernel':<20} {'calls':<10} {'Total time(us)':<15} {'Total Time(%)':<15} {'Avg Time(us)':<15} {'Std Dev(us)':<15}"
+    header += f" {'TFlops':<10}" if metric == EfficiencyMetrics.TFLOPS else f" {'Mem BW':<10}"
+    header += f" {'Utilization(%)':<10}"
     print(header)
     print("=" * len(header))
-    print(f"{'qkv_gemm':<30} {stats.total_qkv_gemm_kernels:<10} {stats.qkv_gemm_avg_time:<15.2f} {stats.qkv_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.qkv_gemm_time_std:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'out_gemm':<30} {stats.total_out_gemm_kernels:<10} {stats.out_gemm_avg_time:<15.2f} {stats.out_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.out_gemm_time_std:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'gate_up_gemm':<30} {stats.total_gateup_gemm_kernels:<10} {stats.gateup_gemm_avg_time:<15.2f} {stats.gateup_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.gateup_gemm_time_std:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'down_gemm':<30} {stats.total_down_gemm_kernels:<10} {stats.down_gemm_avg_time:<15.2f} {stats.down_gemm_avg_time/stats.total_avg_time*100:<15.2f} {stats.down_gemm_time_std:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth_utilization:<15.2f}")
-    print(f"{'fmha':<30} {stats.total_fmha_kernels:<10} {stats.fmha_avg_time:<15.2f} {stats.fmha_avg_time/stats.total_avg_time*100:<15.2f} {stats.fmha_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'norm':<30} {stats.total_norm_kernels:<10} {stats.norm_avg_time:<15.2f} {stats.norm_avg_time/stats.total_avg_time*100:<15.2f} {stats.norm_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'silu_and_mul':<30} {stats.total_act_kernels:<10} {stats.act_avg_time:<15.2f} {stats.act_avg_time/stats.total_avg_time*100:<15.2f} {stats.act_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'rope':<30} {stats.total_rope_kernels:<10} {stats.rope_avg_time:<15.2f} {stats.rope_avg_time/stats.total_avg_time*100:<15.2f} {stats.rope_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'reshape_and_cache':<30} {stats.total_reshape_and_cache_kernels:<10} {stats.reshape_and_cache_avg_time:<15.2f} {stats.reshape_and_cache_avg_time/stats.total_avg_time*100:<15.2f} {stats.reshape_and_cache_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'copy':<30} {stats.total_copy_kernels:<10} {stats.copy_avg_time:<15.2f} {stats.copy_avg_time/stats.total_avg_time*100:<15.2f} {stats.copy_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'all_reduce':<30} {stats.total_allreduce_kernels:<10} {stats.allreduce_avg_time:<15.2f} {stats.allreduce_avg_time/stats.total_avg_time*100:<15.2f} {stats.allreduce_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
-    print(f"{'other':<30} {stats.total_other_kernels:<10} {stats.other_avg_time:<15.2f} {stats.other_avg_time/stats.total_avg_time*100:<15.2f} {stats.other_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<15} {stats.tflops_or_mem_bandwidth_unavailble:<15}")
+    print(f"{'qkv_gemm':<20} {stats.total_qkv_gemm_kernels:<10} {stats.total_qkv_gemm_time:<15.2f} {stats.total_qkv_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.qkv_gemm_avg_time:<15.2f} {stats.qkv_gemm_time_std:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
+    print(f"{'out_gemm':<20} {stats.total_out_gemm_kernels:<10} {stats.total_out_gemm_time:<15.2f} {stats.total_out_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.out_gemm_avg_time:<15.2f} {stats.out_gemm_time_std:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.out_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
+    print(f"{'gate_up_gemm':<20} {stats.total_gateup_gemm_kernels:<10} {stats.total_gateup_gemm_time:<15.2f} {stats.total_gateup_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.gateup_gemm_avg_time:<15.2f} {stats.gateup_gemm_time_std:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
+    print(f"{'down_gemm':<20} {stats.total_down_gemm_kernels:<10} {stats.total_down_gemm_time:<15.2f} {stats.total_down_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.down_gemm_avg_time:<15.2f} {stats.down_gemm_time_std:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.down_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
+    print(f"{'fmha':<20} {stats.total_fmha_kernels:<10} {stats.total_fmha_time:<15.2f} {stats.total_fmha_time/stats.total_kernel_time*100:<15.2f} {stats.fmha_avg_time:<15.2f} {stats.fmha_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'norm':<20} {stats.total_norm_kernels:<10} {stats.total_norm_time:<15.2f} {stats.total_norm_time/stats.total_kernel_time*100:<15.2f} {stats.norm_avg_time:<15.2f} {stats.norm_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'silu_and_mul':<20} {stats.total_act_kernels:<10} {stats.total_act_time:<15.2f} {stats.total_act_time/stats.total_kernel_time*100:<15.2f} {stats.act_avg_time:<15.2f} {stats.act_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'rope':<20} {stats.total_rope_kernels:<10} {stats.total_rope_time:<15.2f} {stats.total_rope_time/stats.total_kernel_time*100:<15.2f} {stats.rope_avg_time:<15.2f} {stats.rope_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'reshape_and_cache':<20} {stats.total_reshape_and_cache_kernels:<10} {stats.total_reshape_and_cache_time:<15.2f} {stats.total_reshape_and_cache_time/stats.total_kernel_time*100:<15.2f} {stats.reshape_and_cache_avg_time:<15.2f} {stats.reshape_and_cache_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'copy':<20} {stats.total_copy_kernels:<10} {stats.total_copy_time:<15.2f} {stats.total_copy_time/stats.total_kernel_time*100:<15.2f} {stats.copy_avg_time:<15.2f} {stats.copy_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'all_reduce':<20} {stats.total_allreduce_kernels:<10} {stats.total_allreduce_time:<15.2f} {stats.total_allreduce_time/stats.total_kernel_time*100:<15.2f} {stats.allreduce_avg_time:<15.2f} {stats.allreduce_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print(f"{'other':<20} {stats.total_other_kernels:<10} {stats.total_other_time:<15.2f} {stats.total_other_time/stats.total_kernel_time*100:<15.2f} {stats.other_avg_time:<15.2f} {stats.other_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
     print("=" * len(header))
-    print(f"{'Total kernels:':<30} {stats.total_kernels:<10}")
-    print(f"{'Total kernel time (us):':<30} {stats.total_kernel_time:<10.2f}")
+    print(f"{'Total kernels:':<20} {stats.total_kernels:<10}")
+    print(f"{'Total kernel time(us):':<20} {stats.total_kernel_time:<10.2f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse vLLM trace json file.")
