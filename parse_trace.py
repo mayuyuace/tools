@@ -15,7 +15,8 @@ DTYPE_TO_BYTES = {
     "fp16": 2,
     "fp32": 4,
     "int8": 1,
-    "int4": 0.5,
+    # qweight + fp16 scale
+    "int4": 0.5234375,
 }
 
 TFLOPS_PEAK = 98
@@ -104,8 +105,12 @@ def load_model_config(args):
         config_file = os.path.join(HF_CONFIG_PATH, "qwen2.5-32b/config.json")
         with open(config_file, "r") as f:
             config = json.load(f)
+    elif args.model == "llama-70b":
+        config_file = os.path.join(HF_CONFIG_PATH, "llama-70b/config.json")
+        with open(config_file, "r") as f:
+            config = json.load(f)
     else:
-        raise ValueError(f"Unsupported model: {args.model}. Only supports llama3-8b and qwen2.5-32b for now! Please provide a valid model name.")
+        raise ValueError(f"Model {args.model} not in supported model list: llama3-8b, qwen2.5-32b, llama-70b. Please provide a valid model name.")
     print(f"Loading model config from {config_file}...")
     # print(config)
     return config
@@ -138,6 +143,11 @@ def get_gemm_shape(config, m, tp):
     # down gemm shape
     down_gemm_shape = (m, intermediate_size // tp, hidden_size)
     gemm_shapes.append(down_gemm_shape)
+
+    print(f"{'qkv_gemm shape (m, k, n):':>30} {qkv_gemm_shape}")
+    print(f"{'out_gemm shape (m, k, n):':>30} {out_gemm_shape}")
+    print(f"{'gateup_gemm shape (m, k, n):':>30} {gateup_gemm_shape}")
+    print(f"{'down_gemm shape (m, k, n):':>30} {down_gemm_shape}")
 
     return gemm_shapes
 
@@ -310,7 +320,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="llama3-8b",
-        help="Model name, e.g., llama3-8b, qwen2.5-32b, etc.",
+        help="Model name, e.g., llama3-8b, qwen2.5-32b, llama-70b, etc.",
     )
     parser.add_argument(
         "--weight_dtype",
