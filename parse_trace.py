@@ -19,8 +19,21 @@ DTYPE_TO_BYTES = {
     "int4": 0.5234375,
 }
 
-TFLOPS_PEAK = 98
-MEM_BANDWIDTH_PEAK = 451
+# for BMG-24G
+
+HW_CONFIG = {
+    "xpu-bmg": {
+        "tflops": 98,
+        "mem_bw": 451,
+    },
+    "cuda-4090d": {
+        "tflops": 98,
+        "mem_bw": 451
+    }
+}
+
+# TFLOPS_PEAK = 98
+# MEM_BANDWIDTH_PEAK = 451
 
 class EfficiencyMetrics(Enum):
     TFLOPS = 0
@@ -36,12 +49,15 @@ class TRACE_STATS():
     total_gateup_gemm_kernels: int = 0
     total_down_gemm_kernels: int = 0
     total_fmha_kernels: int = 0
+    total_flash_fwd_splitkv_kernels: int = 0
+    total_flash_fwd_splitkv_combine_kernels: int = 0
     total_norm_kernels: int = 0
     total_act_kernels: int = 0
     total_rope_kernels: int = 0
     total_reshape_and_cache_kernels: int = 0
     total_copy_kernels: int = 0
     total_allreduce_kernels: int = 0
+    total_dynamic_per_token_scaled_fp8_quant_kernels: int = 0
     total_other_kernels: int = 0
 
     total_kernel_time: float = 0.0
@@ -50,12 +66,15 @@ class TRACE_STATS():
     total_gateup_gemm_time: float = 0.0
     total_down_gemm_time: float = 0.0
     total_fmha_time: float = 0.0
+    total_flash_fwd_splitkv_time: float = 0.0
+    total_flash_fwd_splitkv_combine_time: float = 0.0
     total_norm_time: float = 0.0
     total_act_time: float = 0.0
     total_rope_time: float = 0.0
     total_reshape_and_cache_time: float = 0.0
     total_copy_time: float = 0.0
     total_allreduce_time: float = 0.0
+    total_dynamic_per_token_scaled_fp8_quant_time: float = 0.0
     total_other_time: float = 0.0
     total_avg_time: float = 0.0
 
@@ -69,6 +88,10 @@ class TRACE_STATS():
     down_gemm_time_std: float = 0.0
     fmha_avg_time: float = 0.0
     fmha_time_std: float = 0.0
+    flash_fwd_splitkv_avg_time: float = 0.0
+    flash_fwd_splitkv_time_std: float = 0.0
+    flash_fwd_splitkv_combine_avg_time: float = 0.0
+    flash_fwd_splitkv_combine_time_std: float = 0.0
     norm_avg_time: float = 0.0
     norm_time_std: float = 0.0
     act_avg_time: float = 0.0
@@ -81,6 +104,8 @@ class TRACE_STATS():
     copy_time_std: float = 0.0
     allreduce_avg_time: float = 0.0
     allreduce_time_std: float = 0.0
+    dynamic_per_token_scaled_fp8_quant_avg_time: float = 0.0
+    dynamic_per_token_scaled_fp8_quant_time_std: float = 0.0
     other_avg_time: float = 0.0
     other_time_std: float = 0.0
 
@@ -178,6 +203,11 @@ def compute_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_list: L
             gemm_bandwidth.append(bandwidth)
         return gemm_bandwidth
 
+def safe_mean(time_list):
+    return np.mean(time_list) if len(time_list) > 0 else 0.0
+
+def safe_std(time_list):
+    return np.std(time_list) if len(time_list) > 0 else 0.0
 
 def parse_kernel_info(trace_events: List):
     print("[INFO] Parsing kernel information from trace events...")
@@ -187,12 +217,15 @@ def parse_kernel_info(trace_events: List):
     down_gemm_time_list = []
 
     fmha_time_list = []
+    flash_fwd_splitkv_time_list = []
+    flash_fwd_splitkv_combine_time_list = []
     norm_time_list = []
     act_time_list = []
     rope_time_list = []
     reshape_and_cache_time_list = []
     copy_time_list = []
     allreduce_time_list = []
+    dynamic_per_token_scaled_fp8_quant_time_list = []
     other_time_list = []
 
     stats = TRACE_STATS()
@@ -224,6 +257,14 @@ def parse_kernel_info(trace_events: List):
                     stats.total_fmha_time += duration
                     fmha_time_list.append(duration)
                     stats.total_fmha_kernels += 1
+                elif 'flash_fwd_splitkv_combine' in kernel_name:
+                    stats.total_flash_fwd_splitkv_combine_time += duration
+                    flash_fwd_splitkv_combine_time_list.append(duration)
+                    stats.total_flash_fwd_splitkv_combine_kernels += 1
+                elif 'flash_fwd_splitkv' in kernel_name:
+                    stats.total_flash_fwd_splitkv_time += duration
+                    flash_fwd_splitkv_time_list.append(duration)
+                    stats.total_flash_fwd_splitkv_kernels += 1
                 elif 'norm' in kernel_name:
                     stats.total_norm_time += duration
                     norm_time_list.append(duration)
@@ -232,15 +273,15 @@ def parse_kernel_info(trace_events: List):
                     stats.total_allreduce_time += duration
                     allreduce_time_list.append(duration)
                     stats.total_allreduce_kernels += 1
-                elif 'op_and_mul' in kernel_name:
+                elif 'and_mul' in kernel_name:
                     stats.total_act_time += duration
                     act_time_list.append(duration)
                     stats.total_act_kernels += 1
-                elif 'rotaryembedding' in kernel_name:
+                elif 'rotary' in kernel_name:
                     stats.total_rope_time += duration
                     rope_time_list.append(duration)
                     stats.total_rope_kernels += 1
-                elif 'reshapeandcache' in kernel_name:
+                elif 'reshapeandcache' in kernel_name or 'reshape_and_cache' in kernel_name:
                     stats.total_reshape_and_cache_time += duration
                     reshape_and_cache_time_list.append(duration)
                     stats.total_reshape_and_cache_kernels += 1
@@ -248,6 +289,10 @@ def parse_kernel_info(trace_events: List):
                     stats.total_copy_time += duration
                     copy_time_list.append(duration)
                     stats.total_copy_kernels += 1
+                elif 'dynamic_per_token_scaled_fp8_quant_kernel' in kernel_name:
+                    stats.total_dynamic_per_token_scaled_fp8_quant_time += duration
+                    dynamic_per_token_scaled_fp8_quant_time_list.append(duration)
+                    stats.total_dynamic_per_token_scaled_fp8_quant_kernels += 1
                 else:
                     stats.total_other_time += duration
                     other_time_list.append(duration)
@@ -255,59 +300,78 @@ def parse_kernel_info(trace_events: List):
                 stats.total_kernels += 1
                 stats.total_kernel_time += duration
 
-    stats.qkv_gemm_avg_time = np.mean(qkv_gemm_time_list)
-    stats.out_gemm_avg_time = np.mean(out_gemm_time_list)
-    stats.gateup_gemm_avg_time = np.mean(gateup_gemm_time_list)
-    stats.down_gemm_avg_time = np.mean(down_gemm_time_list)
-    stats.fmha_avg_time = np.mean(fmha_time_list)
-    stats.norm_avg_time = np.mean(norm_time_list)
-    stats.act_avg_time = np.mean(act_time_list)
-    stats.rope_avg_time = np.mean(rope_time_list)
-    stats.reshape_and_cache_avg_time = np.mean(reshape_and_cache_time_list)
-    stats.copy_avg_time = np.mean(copy_time_list)
-    stats.allreduce_avg_time = np.mean(allreduce_time_list)
-    stats.other_avg_time = np.mean(other_time_list)
+    stats.qkv_gemm_avg_time = safe_mean(qkv_gemm_time_list)
+    stats.out_gemm_avg_time = safe_mean(out_gemm_time_list)
+    stats.gateup_gemm_avg_time = safe_mean(gateup_gemm_time_list)
+    stats.down_gemm_avg_time = safe_mean(down_gemm_time_list)
+    stats.fmha_avg_time = safe_mean(fmha_time_list)
+    stats.flash_fwd_splitkv_avg_time = safe_mean(flash_fwd_splitkv_time_list)
+    stats.flash_fwd_splitkv_combine_avg_time = safe_mean(flash_fwd_splitkv_combine_time_list)
+    stats.norm_avg_time = safe_mean(norm_time_list)
+    stats.act_avg_time = safe_mean(act_time_list)
+    stats.rope_avg_time = safe_mean(rope_time_list)
+    stats.reshape_and_cache_avg_time = safe_mean(reshape_and_cache_time_list)
+    stats.copy_avg_time = safe_mean(copy_time_list)
+    stats.allreduce_avg_time = safe_mean(allreduce_time_list)
+    stats.dynamic_per_token_scaled_fp8_quant_avg_time = safe_mean(dynamic_per_token_scaled_fp8_quant_time_list)
+    stats.other_avg_time = safe_mean(other_time_list)
     stats.total_avg_time = stats.qkv_gemm_avg_time + stats.out_gemm_avg_time + stats.gateup_gemm_avg_time + stats.down_gemm_avg_time + \
         stats.fmha_avg_time + stats.norm_avg_time + stats.act_avg_time + stats.rope_avg_time + \
         stats.reshape_and_cache_avg_time + stats.copy_avg_time + stats.allreduce_avg_time + stats.other_avg_time
 
-    stats.qkv_gemm_time_std = np.std(qkv_gemm_time_list)
-    stats.out_gemm_time_std = np.std(out_gemm_time_list)
-    stats.gateup_gemm_time_std = np.std(gateup_gemm_time_list)
-    stats.down_gemm_time_std = np.std(down_gemm_time_list)
-    stats.fmha_time_std = np.std(fmha_time_list)
-    stats.norm_time_std = np.std(norm_time_list)
-    stats.act_time_std = np.std(act_time_list)
-    stats.rope_time_std = np.std(rope_time_list)
-    stats.reshape_and_cache_time_std = np.std(reshape_and_cache_time_list)
-    stats.copy_time_std = np.std(copy_time_list)
-    stats.allreduce_time_std = np.std(allreduce_time_list)
-    stats.other_time_std = np.std(other_time_list)
+    stats.qkv_gemm_time_std = safe_std(qkv_gemm_time_list)
+    stats.out_gemm_time_std = safe_std(out_gemm_time_list)
+    stats.gateup_gemm_time_std = safe_std(gateup_gemm_time_list)
+    stats.down_gemm_time_std = safe_std(down_gemm_time_list)
+    stats.fmha_time_std = safe_std(fmha_time_list)
+    stats.flash_fwd_splitkv_time_std = safe_std(flash_fwd_splitkv_time_list)
+    stats.flash_fwd_splitkv_combine_time_std = safe_std(flash_fwd_splitkv_combine_time_list)
+    stats.norm_time_std = safe_std(norm_time_list)
+    stats.act_time_std = safe_std(act_time_list)
+    stats.rope_time_std = safe_std(rope_time_list)
+    stats.reshape_and_cache_time_std = safe_std(reshape_and_cache_time_list)
+    stats.copy_time_std = safe_std(copy_time_list)
+    stats.allreduce_time_std = safe_std(allreduce_time_list)
+    stats.dynamic_per_token_scaled_fp8_quant_time_std = safe_std(dynamic_per_token_scaled_fp8_quant_time_list)
+    stats.other_time_std = safe_std(other_time_list)
 
     return stats
 
+def print_onlyif_appeared(kernel_name, num_call, total_time, total_time_percentage, avg_time, std_time, tflops_or_membw, tflops_or_membw_utilization):
+    if num_call <= 0:
+        return
+    content = f"{kernel_name:<25} {num_call:<10} {total_time:<15.2f} {total_time_percentage:<15.2f} {avg_time:<15.2f} {std_time:<15.2f} "
+    if tflops_or_membw_utilization == "N/A":
+        content += f"{tflops_or_membw:<10} {tflops_or_membw_utilization:<10}"
+    else:
+        content += f"{tflops_or_membw:<10.2f} {tflops_or_membw_utilization:<10.2f}"
+    print(content)
 
 def print_trace_stats(stats: TRACE_STATS, metric: EfficiencyMetrics):
-    header = f"{'Kernel':<20} {'calls':<10} {'Total time(us)':<15} {'Total Time(%)':<15} {'Avg Time(us)':<15} {'Std Dev(us)':<15}"
+    header = f"{'Kernel':<25} {'calls':<10} {'Total time(us)':<15} {'Total Time(%)':<15} {'Avg Time(us)':<15} {'Std Dev(us)':<15}"
     header += f" {'TFlops':<10}" if metric == EfficiencyMetrics.TFLOPS else f" {'Mem BW':<10}"
     header += f" {'Utilization(%)':<10}"
     print(header)
     print("=" * len(header))
-    print(f"{'qkv_gemm':<20} {stats.total_qkv_gemm_kernels:<10} {stats.total_qkv_gemm_time:<15.2f} {stats.total_qkv_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.qkv_gemm_avg_time:<15.2f} {stats.qkv_gemm_time_std:<15.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.qkv_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
-    print(f"{'out_gemm':<20} {stats.total_out_gemm_kernels:<10} {stats.total_out_gemm_time:<15.2f} {stats.total_out_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.out_gemm_avg_time:<15.2f} {stats.out_gemm_time_std:<15.2f} {stats.out_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.out_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
-    print(f"{'gate_up_gemm':<20} {stats.total_gateup_gemm_kernels:<10} {stats.total_gateup_gemm_time:<15.2f} {stats.total_gateup_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.gateup_gemm_avg_time:<15.2f} {stats.gateup_gemm_time_std:<15.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.gateup_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
-    print(f"{'down_gemm':<20} {stats.total_down_gemm_kernels:<10} {stats.total_down_gemm_time:<15.2f} {stats.total_down_gemm_time/stats.total_kernel_time*100:<15.2f} {stats.down_gemm_avg_time:<15.2f} {stats.down_gemm_time_std:<15.2f} {stats.down_gemm_tflops_or_mem_bandwidth:<10.2f} {stats.down_gemm_tflops_or_mem_bandwidth_utilization:<10.2f}")
-    print(f"{'fmha':<20} {stats.total_fmha_kernels:<10} {stats.total_fmha_time:<15.2f} {stats.total_fmha_time/stats.total_kernel_time*100:<15.2f} {stats.fmha_avg_time:<15.2f} {stats.fmha_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'norm':<20} {stats.total_norm_kernels:<10} {stats.total_norm_time:<15.2f} {stats.total_norm_time/stats.total_kernel_time*100:<15.2f} {stats.norm_avg_time:<15.2f} {stats.norm_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'silu_and_mul':<20} {stats.total_act_kernels:<10} {stats.total_act_time:<15.2f} {stats.total_act_time/stats.total_kernel_time*100:<15.2f} {stats.act_avg_time:<15.2f} {stats.act_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'rope':<20} {stats.total_rope_kernels:<10} {stats.total_rope_time:<15.2f} {stats.total_rope_time/stats.total_kernel_time*100:<15.2f} {stats.rope_avg_time:<15.2f} {stats.rope_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'reshape_and_cache':<20} {stats.total_reshape_and_cache_kernels:<10} {stats.total_reshape_and_cache_time:<15.2f} {stats.total_reshape_and_cache_time/stats.total_kernel_time*100:<15.2f} {stats.reshape_and_cache_avg_time:<15.2f} {stats.reshape_and_cache_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'copy':<20} {stats.total_copy_kernels:<10} {stats.total_copy_time:<15.2f} {stats.total_copy_time/stats.total_kernel_time*100:<15.2f} {stats.copy_avg_time:<15.2f} {stats.copy_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'all_reduce':<20} {stats.total_allreduce_kernels:<10} {stats.total_allreduce_time:<15.2f} {stats.total_allreduce_time/stats.total_kernel_time*100:<15.2f} {stats.allreduce_avg_time:<15.2f} {stats.allreduce_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
-    print(f"{'other':<20} {stats.total_other_kernels:<10} {stats.total_other_time:<15.2f} {stats.total_other_time/stats.total_kernel_time*100:<15.2f} {stats.other_avg_time:<15.2f} {stats.other_time_std:<15.2f} {stats.tflops_or_mem_bandwidth_unavailble:<10} {stats.tflops_or_mem_bandwidth_unavailble:<10}")
+    print_onlyif_appeared('qkv_gemm', stats.total_qkv_gemm_kernels, stats.total_qkv_gemm_time, stats.total_qkv_gemm_time/stats.total_kernel_time*100, stats.qkv_gemm_avg_time, stats.qkv_gemm_time_std, stats.qkv_gemm_tflops_or_mem_bandwidth, stats.qkv_gemm_tflops_or_mem_bandwidth_utilization)
+    print_onlyif_appeared('out_gemm', stats.total_out_gemm_kernels, stats.total_out_gemm_time, stats.total_out_gemm_time/stats.total_kernel_time*100, stats.out_gemm_avg_time, stats.out_gemm_time_std, stats.out_gemm_tflops_or_mem_bandwidth, stats.out_gemm_tflops_or_mem_bandwidth_utilization)
+    print_onlyif_appeared('gate_up_gemm', stats.total_gateup_gemm_kernels, stats.total_gateup_gemm_time, stats.total_gateup_gemm_time/stats.total_kernel_time*100, stats.gateup_gemm_avg_time, stats.gateup_gemm_time_std, stats.gateup_gemm_tflops_or_mem_bandwidth, stats.gateup_gemm_tflops_or_mem_bandwidth_utilization)
+    print_onlyif_appeared('down_gemm', stats.total_down_gemm_kernels, stats.total_down_gemm_time, stats.total_down_gemm_time/stats.total_kernel_time*100, stats.down_gemm_avg_time, stats.down_gemm_time_std, stats.down_gemm_tflops_or_mem_bandwidth, stats.down_gemm_tflops_or_mem_bandwidth_utilization)
+    print_onlyif_appeared('fmha', stats.total_fmha_kernels, stats.total_fmha_time, stats.total_fmha_time/stats.total_kernel_time*100, stats.fmha_avg_time, stats.fmha_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('flash_fwd_splitkv', stats.total_flash_fwd_splitkv_kernels, stats.total_flash_fwd_splitkv_time, stats.total_flash_fwd_splitkv_time/stats.total_kernel_time*100, stats.flash_fwd_splitkv_avg_time, stats.flash_fwd_splitkv_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('flash_fwd_splitkv_combine', stats.total_flash_fwd_splitkv_combine_kernels, stats.total_flash_fwd_splitkv_combine_time, stats.total_flash_fwd_splitkv_combine_time/stats.total_kernel_time*100, stats.flash_fwd_splitkv_combine_avg_time, stats.flash_fwd_splitkv_combine_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('norm', stats.total_norm_kernels, stats.total_norm_time, stats.total_norm_time/stats.total_kernel_time*100, stats.norm_avg_time, stats.norm_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('silu_and_mul', stats.total_act_kernels, stats.total_act_time, stats.total_act_time/stats.total_kernel_time*100, stats.act_avg_time, stats.act_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('rope', stats.total_rope_kernels, stats.total_rope_time, stats.total_rope_time/stats.total_kernel_time*100, stats.rope_avg_time, stats.rope_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('reshape_and_cache', stats.total_reshape_and_cache_kernels, stats.total_reshape_and_cache_time, stats.total_reshape_and_cache_time/stats.total_kernel_time*100, stats.reshape_and_cache_avg_time, stats.reshape_and_cache_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('copy', stats.total_copy_kernels, stats.total_copy_time, stats.total_copy_time/stats.total_kernel_time*100, stats.copy_avg_time, stats.copy_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('all_reduce', stats.total_allreduce_kernels, stats.total_allreduce_time, stats.total_allreduce_time/stats.total_kernel_time*100, stats.allreduce_avg_time, stats.allreduce_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('dynamic_fp8_quant', stats.total_dynamic_per_token_scaled_fp8_quant_kernels, stats.total_dynamic_per_token_scaled_fp8_quant_time, stats.total_dynamic_per_token_scaled_fp8_quant_time/stats.total_kernel_time*100, stats.dynamic_per_token_scaled_fp8_quant_avg_time, stats.dynamic_per_token_scaled_fp8_quant_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('other', stats.total_other_kernels, stats.total_other_time, stats.total_other_time/stats.total_kernel_time*100, stats.other_avg_time, stats.other_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+
     print("=" * len(header))
-    print(f"{'Total kernels:':<20} {stats.total_kernels:<10}")
-    print(f"{'Total kernel time(us):':<20} {stats.total_kernel_time:<10.2f}")
+    print(f"{'Total kernels:':<25} {stats.total_kernels:<10}")
+    print(f"{'Total kernel time(us):':<25} {stats.total_kernel_time:<10.2f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse vLLM trace json file.")
@@ -315,6 +379,12 @@ if __name__ == "__main__":
         "--trace_json_file",
         type=str,
         help="Path to the vLLM trace json file.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="xpu-bmg",
+        help="Device name, e.g., xpu-bmg, cuda-4090d",
     )
     parser.add_argument(
         "--model",
@@ -359,6 +429,13 @@ if __name__ == "__main__":
     trace_stats.out_gemm_tflops_or_mem_bandwidth = gemm_bandwidth_or_tflops[1]
     trace_stats.gateup_gemm_tflops_or_mem_bandwidth = gemm_bandwidth_or_tflops[2]
     trace_stats.down_gemm_tflops_or_mem_bandwidth = gemm_bandwidth_or_tflops[3]
+
+    device = args.device
+    assert device in ["xpu-bmg", "cuda-4090d"], f"Unsupported device {device}!"
+
+    TFLOPS_PEAK = HW_CONFIG[device]["tflops"]
+    MEM_BANDWIDTH_PEAK = HW_CONFIG[device]["mem_bw"]
+    print(f"[WARNING] Pls confirm the HW spec for {device}: tflops = {TFLOPS_PEAK}, mem_bw = {MEM_BANDWIDTH_PEAK}")
 
     trace_stats.qkv_gemm_tflops_or_mem_bandwidth_utilization = (
         trace_stats.qkv_gemm_tflops_or_mem_bandwidth / TFLOPS_PEAK * 100
