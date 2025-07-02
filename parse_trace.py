@@ -225,7 +225,10 @@ def compute_fmha_tflops_or_membandwidth(trace_stats: TRACE_STATS, context_len: L
         return total_flops / (trace_stats.fmha_avg_time * 1e6)  # in TFLOPs
 
     elif metric == EfficiencyMetrics.MEM_BANDWIDTH:
-        total_context_len = sum(context_len)
+        total_context_len = 0
+        for c_len, s_len in zip(context_len, seq_len):
+            if s_len == 1:
+                total_context_len += c_len
         total_bytes_transferred = total_context_len * num_key_value_heads_per_rank * head_dim * 2 * DTYPE_TO_BYTES[kv_cache_dtype]
         return total_bytes_transferred / (trace_stats.fmha_avg_time * 1e3)  # in GB/s
 
