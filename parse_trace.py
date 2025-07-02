@@ -117,6 +117,8 @@ class TRACE_STATS():
     gateup_gemm_tflops_or_mem_bandwidth_utilization: float = 0.0
     down_gemm_tflops_or_mem_bandwidth: float = 0.0
     down_gemm_tflops_or_mem_bandwidth_utilization: float = 0.0
+    fmha_tflops_or_mem_bandwidth: float = 0.0
+    fmha_tflops_or_mem_bandwidth_utilization: float = 0.0
 
     tflops_or_mem_bandwidth_unavailble: str = "N/A"
 
@@ -176,7 +178,7 @@ def get_gemm_shape(config, m, tp):
 
     return gemm_shapes
 
-def compute_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_list: List, weight_dtype: str, metric: EfficiencyMetrics):
+def compute_gemm_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_list: List, weight_dtype: str, metric: EfficiencyMetrics):
     print("[INFO] Computing TFlops or memory bandwidth...")
     gemm_time_list = [
             trace_stats.qkv_gemm_avg_time,
@@ -202,6 +204,31 @@ def compute_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_list: L
             bandwidth = bytes_transferred / (gemm_time * 1e3)
             gemm_bandwidth.append(bandwidth)
         return gemm_bandwidth
+
+
+def compute_fmha_tflops_or_membandwidth(trace_stats: TRACE_STATS, context_len: List[int], seq_len: List[int], model_config, tp: int, kv_cache_dtype: str, metric: EfficiencyMetrics):
+    assert len(context_len) == len(seq_len), "context_len and seq_len must have the same length."
+
+    hidden_size = model_config["hidden_size"]
+    num_attention_heads = model_config["num_attention_heads"]
+    num_attention_heads_per_rank = num_attention_heads // tp
+    num_key_value_heads = model_config["num_key_value_heads"]
+    num_key_value_heads_per_rank = num_key_value_heads // tp
+    head_dim = model_config.get("head_dim", None) or hidden_size // num_attention_heads
+
+    if metric == EfficiencyMetrics.TFLOPS:
+        total_flops = 0
+        for s_len in seq_len:
+            # only consider gemm in prefill which is the dominant term
+            if s_len > 1:
+                total_flops += 4 * s_len * s_len * num_attention_heads_per_rank * head_dim
+        return total_flops / (trace_stats.fmha_avg_time * 1e6)  # in TFLOPs
+
+    elif metric == EfficiencyMetrics.MEM_BANDWIDTH:
+        total_context_len = sum(context_len)
+        total_bytes_transferred = total_context_len * num_key_value_heads_per_rank * head_dim * 2 * DTYPE_TO_BYTES[kv_cache_dtype]
+        return total_bytes_transferred / (trace_stats.fmha_avg_time * 1e3)  # in GB/s
+
 
 def safe_mean(time_list):
     return np.mean(time_list) if len(time_list) > 0 else 0.0
@@ -357,7 +384,7 @@ def print_trace_stats(stats: TRACE_STATS, metric: EfficiencyMetrics):
     print_onlyif_appeared('out_gemm', stats.total_out_gemm_kernels, stats.total_out_gemm_time, stats.total_out_gemm_time/stats.total_kernel_time*100, stats.out_gemm_avg_time, stats.out_gemm_time_std, stats.out_gemm_tflops_or_mem_bandwidth, stats.out_gemm_tflops_or_mem_bandwidth_utilization)
     print_onlyif_appeared('gate_up_gemm', stats.total_gateup_gemm_kernels, stats.total_gateup_gemm_time, stats.total_gateup_gemm_time/stats.total_kernel_time*100, stats.gateup_gemm_avg_time, stats.gateup_gemm_time_std, stats.gateup_gemm_tflops_or_mem_bandwidth, stats.gateup_gemm_tflops_or_mem_bandwidth_utilization)
     print_onlyif_appeared('down_gemm', stats.total_down_gemm_kernels, stats.total_down_gemm_time, stats.total_down_gemm_time/stats.total_kernel_time*100, stats.down_gemm_avg_time, stats.down_gemm_time_std, stats.down_gemm_tflops_or_mem_bandwidth, stats.down_gemm_tflops_or_mem_bandwidth_utilization)
-    print_onlyif_appeared('fmha', stats.total_fmha_kernels, stats.total_fmha_time, stats.total_fmha_time/stats.total_kernel_time*100, stats.fmha_avg_time, stats.fmha_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
+    print_onlyif_appeared('fmha', stats.total_fmha_kernels, stats.total_fmha_time, stats.total_fmha_time/stats.total_kernel_time*100, stats.fmha_avg_time, stats.fmha_time_std, stats.fmha_tflops_or_mem_bandwidth, stats.fmha_tflops_or_mem_bandwidth_utilization)
     print_onlyif_appeared('flash_fwd_splitkv', stats.total_flash_fwd_splitkv_kernels, stats.total_flash_fwd_splitkv_time, stats.total_flash_fwd_splitkv_time/stats.total_kernel_time*100, stats.flash_fwd_splitkv_avg_time, stats.flash_fwd_splitkv_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
     print_onlyif_appeared('flash_fwd_splitkv_combine', stats.total_flash_fwd_splitkv_combine_kernels, stats.total_flash_fwd_splitkv_combine_time, stats.total_flash_fwd_splitkv_combine_time/stats.total_kernel_time*100, stats.flash_fwd_splitkv_combine_avg_time, stats.flash_fwd_splitkv_combine_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
     print_onlyif_appeared('norm', stats.total_norm_kernels, stats.total_norm_time, stats.total_norm_time/stats.total_kernel_time*100, stats.norm_avg_time, stats.norm_time_std, stats.tflops_or_mem_bandwidth_unavailble, stats.tflops_or_mem_bandwidth_unavailble)
@@ -381,6 +408,11 @@ if __name__ == "__main__":
         help="Path to the vLLM trace json file.",
     )
     parser.add_argument(
+        "--scheinfo_json_file",
+        type=str,
+        help="Path to the vLLM scheinfo json file with profiler on.",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="xpu-bmg",
@@ -399,6 +431,12 @@ if __name__ == "__main__":
         help="Weight data type, e.g., fp8, fp16, fp32, int8, int4.",
     )
     parser.add_argument(
+        "--kv_dtype",
+        type=str,
+        default="fp16",
+        help="KV cache data type, e.g., fp8, fp16, int8.",
+    )
+    parser.add_argument(
         "--tp",
         type=int,
         default=4,
@@ -414,17 +452,25 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     m = int(args.trace_json_file.split("/")[-1].split(".")[0].split("_")[-1])
+    step = int(args.trace_json_file.split("/")[-1].split(".")[0].split("_")[-3])
 
     config = load_model_config(args)
     trace_events = load_trace_json(args)
     print("Trace events loaded successfully.")
+    with open(args.scheinfo_json_file, "r") as f:
+        scheinfo = json.load(f)
 
     gemm_shapes = get_gemm_shape(config, m, tp=args.tp)
     trace_stats = parse_kernel_info(trace_events)
-    gemm_bandwidth_or_tflops = compute_tflops_or_mem_bandwidth(
+    gemm_bandwidth_or_tflops = compute_gemm_tflops_or_mem_bandwidth(
         trace_stats, gemm_shapes, args.weight_dtype, EfficiencyMetrics[args.metric.upper()]
     )
-    
+    context_lens = scheinfo["steps"][step - 1]["context_lens"]
+    seq_lens = scheinfo["steps"][step - 1]["tokens"]
+    fmha_bandwidth_or_tflops = compute_fmha_tflops_or_membandwidth(
+        trace_stats, context_lens, seq_lens, config, args.tp, args.kv_dtype, EfficiencyMetrics[args.metric.upper()]
+    )
+    trace_stats.fmha_tflops_or_mem_bandwidth = fmha_bandwidth_or_tflops
     trace_stats.qkv_gemm_tflops_or_mem_bandwidth = gemm_bandwidth_or_tflops[0]
     trace_stats.out_gemm_tflops_or_mem_bandwidth = gemm_bandwidth_or_tflops[1]
     trace_stats.gateup_gemm_tflops_or_mem_bandwidth = gemm_bandwidth_or_tflops[2]
@@ -456,6 +502,11 @@ if __name__ == "__main__":
         trace_stats.down_gemm_tflops_or_mem_bandwidth / TFLOPS_PEAK * 100
         if args.metric == "tflops" else
         trace_stats.down_gemm_tflops_or_mem_bandwidth / MEM_BANDWIDTH_PEAK * 100
+    )
+    trace_stats.fmha_tflops_or_mem_bandwidth_utilization = (
+        trace_stats.fmha_tflops_or_mem_bandwidth / TFLOPS_PEAK * 100
+        if args.metric == "tflops" else
+        trace_stats.fmha_tflops_or_mem_bandwidth / MEM_BANDWIDTH_PEAK * 100
     )
 
     print_trace_stats(trace_stats, EfficiencyMetrics[args.metric.upper()])
