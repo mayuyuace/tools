@@ -132,12 +132,16 @@ def load_model_config(args):
         config_file = os.path.join(HF_CONFIG_PATH, "qwen2.5-32b/config.json")
         with open(config_file, "r") as f:
             config = json.load(f)
-    elif args.model == "llama-70b":
-        config_file = os.path.join(HF_CONFIG_PATH, "llama-70b/config.json")
+    elif args.model == "llama3-70b":
+        config_file = os.path.join(HF_CONFIG_PATH, "llama3-70b/config.json")
+        with open(config_file, "r") as f:
+            config = json.load(f)
+    elif args.model == "qwen2.5-14b":
+        config_file = os.path.join(HF_CONFIG_PATH, "qwen2.5-14b/config.json")
         with open(config_file, "r") as f:
             config = json.load(f)
     else:
-        raise ValueError(f"Model {args.model} not in supported model list: llama3-8b, qwen2.5-32b, llama-70b. Please provide a valid model name.")
+        raise ValueError(f"Model {args.model} not in supported model list: llama3-8b, qwen2.5-32b, qwen2.5-14b, llama3-70b. Please provide a valid model name.")
     print(f"Loading model config from {config_file}...")
     # print(config)
     return config
@@ -425,7 +429,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="llama3-8b",
-        help="Model name, e.g., llama3-8b, qwen2.5-32b, llama-70b, etc.",
+        help="Model name, e.g., llama3-8b, qwen2.5-32b, qwen2.5-14b, llama3-70b, etc.",
     )
     parser.add_argument(
         "--weight_dtype",

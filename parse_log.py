@@ -74,7 +74,7 @@ def extract_scheduling_info(lines):
                         step_info['decode_request_num'] += 1
                         step_info['decode_tokens'] += num_scheduled_token
                 elif 'step' in cur_line:
-                    temp = cur_line.split("=")[3]
+                    temp = cur_line.split("=")[-2]
                     step = int(re.split(':| ', temp)[3].strip())
                     model_forward_time = float(cur_line.split("=")[-1].strip()) * 1000
                     step_info['step_id'] = step
