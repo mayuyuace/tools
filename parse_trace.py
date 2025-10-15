@@ -222,7 +222,7 @@ def get_gemm_shape(config, m, tp, is_moe=False, topk=1, num_experts=1):
 
     return gemm_shapes
 
-def compute_gemm_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_list: List, weight_dtype: str, metric: EfficiencyMetrics, is_moe=False):
+def compute_gemm_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_list: List, weight_dtype: str, metric: EfficiencyMetrics, is_moe=False, real_num_experts=1):
     print("[INFO] Computing TFlops or memory bandwidth...")
     if is_moe:
         gemm_time_list = [
@@ -253,6 +253,9 @@ def compute_gemm_tflops_or_mem_bandwidth(trace_stats: TRACE_STATS, gemm_shape_li
     elif metric == EfficiencyMetrics.MEM_BANDWIDTH:
         # print("[INFO] Computing memory bandwidth...")
         gemm_bandwidth = []
+        if is_moe:
+            gemm_time_list[-1] /= real_num_experts
+            gemm_time_list[-2] /= real_num_experts
         for gemm_time, gemm_shape in zip(gemm_time_list, gemm_shape_list):
             m, k, n = gemm_shape
             bytes_transferred = k * n * DTYPE_TO_BYTES[weight_dtype]
@@ -323,7 +326,7 @@ def parse_kernel_info(trace_events: List, is_moe=False) -> TRACE_STATS:
             if 'cat' in event.keys() and event['cat'] == 'kernel':
                 kernel_name = event['name'].lower()
                 duration = event["dur"]
-                if 'fmha' in kernel_name:
+                if ('fmha' in kernel_name) or ('paged_attention' in kernel_name):
                     stats.total_fmha_time += duration
                     fmha_time_list.append(duration)
                     stats.total_fmha_kernels += 1
@@ -557,21 +560,24 @@ if __name__ == "__main__":
     step = int(args.trace_json_file.split("/")[-1].split(".")[0].split("_")[-3])
 
     config = load_model_config(args)
-    num_experts = 1
-    if is_moe:
-        if args.model == "llama4-scout":
-            num_experts = config["num_local_experts"]
-        else:
-            raise ValueError(f"Please provide num_experts for moe model {args.model}!")
     trace_events = load_trace_json(args)
     print("Trace events loaded successfully.")
     with open(args.scheinfo_json_file, "r") as f:
         scheinfo = json.load(f)
 
+    num_experts = 1
+    if is_moe:
+        real_num_experts = scheinfo["steps"][step - 1]["real_num_experts"]
+        if args.model == "llama4-scout":
+            num_experts = config["num_local_experts"]
+        else:
+            raise ValueError(f"Please provide num_experts for moe model {args.model}!")
+        print(f"num_experts: {num_experts}, real_num_experts: {real_num_experts}, ")
+
     gemm_shapes = get_gemm_shape(config, m, tp=args.tp, is_moe=is_moe, num_experts=num_experts)
     trace_stats = parse_kernel_info(trace_events, is_moe=is_moe)
     gemm_bandwidth_or_tflops = compute_gemm_tflops_or_mem_bandwidth(
-        trace_stats, gemm_shapes, args.weight_dtype, EfficiencyMetrics[args.metric.upper()], is_moe=is_moe
+        trace_stats, gemm_shapes, args.weight_dtype, EfficiencyMetrics[args.metric.upper()], is_moe=is_moe, real_num_experts=real_num_experts
     )
     context_lens = scheinfo["steps"][step - 1]["context_lens"]
     seq_lens = scheinfo["steps"][step - 1]["tokens"]

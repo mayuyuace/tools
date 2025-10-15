@@ -49,7 +49,8 @@ def extract_scheduling_info(lines):
                 'decode_tokens': 0,
                 'model_forward_time': 0.0,
                 'duration': 0.0,
-                'step_id': -1
+                'step_id': -1,
+                'reald_num_experts':1,
             }
             total_requests_num = int(line.split(':')[-1].strip())
             step_info['total_requests_num'] = total_requests_num
@@ -82,6 +83,9 @@ def extract_scheduling_info(lines):
                 elif 'execution time' in cur_line:
                     execution_time = float(cur_line.split(":")[-1].split(" ")[1].strip())
                     step_info['duration'] = execution_time
+                elif 'real_num_experts' in cur_line:
+                    real_num_experts = int(cur_line.split(':')[-1].strip())
+                    step_info['real_num_experts'] = real_num_experts
             assert len(step_info['context_lens']) == step_info['total_requests_num'], f"total_requests_num {step_info['total_requests_num']} does not match context_lens length {len(step_info['context_lens'])}"
             assert len(step_info['tokens']) == step_info['total_requests_num'], f"total_requests_num {step_info['total_requests_num']} does not match tokens length {len(step_info['tokens'])}"
             assert sum(step_info['tokens']) == step_info['total_num_scheduled_tokens'], f"total_num_scheduled_tokens {step_info['total_num_scheduled_tokens']} does not match sum of tokens {sum(step_info['tokens'])}"
